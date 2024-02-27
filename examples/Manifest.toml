@@ -921,7 +921,7 @@ uuid = "d8a4904e-b15c-11e9-3269-09a3773c0cb0"
 version = "1.4.1"
 
 [[deps.MyFirstPackage]]
-deps = ["OMEinsum"]
+deps = ["GLMakie", "LinearAlgebra", "Makie", "OMEinsum"]
 path = ".."
 uuid = "a3a32a73-647e-4b45-acfc-718992cee124"
 version = "1.0.0-DEV"
