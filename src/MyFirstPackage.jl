@@ -1,25 +1,13 @@
 module MyFirstPackage
-# import the OMEinsum package (not really used in this example)
-using OMEinsum
+# import packages
+using LinearAlgebra
 
-# export `greet` as a public function
-export greet
+# export interfaces
+export Lorenz, integrate_step
+export Point, Point2D, Point3D
+export RungeKutta, Euclidean
 
-"""
-    greet(name::String)
-
-Return a greeting message to the input `name`.
-"""
-function greet(name::String)
-    # `$` is used to interpolate the variable `name` into the string
-    return "Hello, $(name)!"
-end
-
-# this function is not exported
-function private_sum(v::AbstractVector{<:Real})
-    # we implement the sum function by using the `@ein_str` macro
-    # from the OMEinsum package
-    return ein"i->"(v)[]
-end
+# `include` other source files into this module
+include("lorenz.jl")
 
 end
