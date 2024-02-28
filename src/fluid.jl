@@ -6,7 +6,7 @@ An abstract type for lattice Boltzmann configurations.
 abstract type AbstractLBConfig{D, N} end
 
 """
-    D2Q9
+    D2Q9 <: AbstractLBConfig{2, 9}
 
 A lattice Boltzmann configuration for 2D, 9-velocity model.
 """
@@ -17,7 +17,7 @@ directions(::D2Q9) = (
         Point(0, 0), Point(0, 1),
         Point(-1, 0), Point(1, -1),
         Point(-1, -1),
-    )
+)
 
 
 # directions[k] is the opposite of directions[flip_direction_index(k)
@@ -29,29 +29,53 @@ end
 struct Cell{N, T <: Real}
     density::NTuple{N, T}
 end
-# the total desnity of the fluid
+# the total density of the fluid
 density(cell::Cell) = sum(cell.density)
 # the density of the fluid in a specific direction,
 # where the direction is an integer
 density(cell::Cell, direction::Int) = cell.density[direction]
 
-
 """
-    velocity(lb::AbstractLBConfig, rho::Cell)
+    momentum(lb::AbstractLBConfig, rho::Cell)
 
-Compute the velocity of the fluid from the density of the fluid.
+Compute the momentum of the fluid from the density of the fluid.
 """
-function velocity(lb::AbstractLBConfig, rho::Cell)
+function momentum(lb::AbstractLBConfig, rho::Cell)
     return mapreduce((r, d) -> r * d, +, rho.density, directions(lb)) / density(rho)
 end
 
 Base.:+(x::Cell, y::Cell) = Cell(x.density .+ y.density)
 Base.:*(x::Real, y::Cell) = Cell(x .* y.density)
 
+# streaming step
+function stream!(
+        lb::AbstractLBConfig{2, N},  # lattice configuration
+        newgrid::AbstractMatrix{D}, # the updated grid
+        grid::AbstractMatrix{D}, # the original grid
+        barrier::AbstractMatrix{Bool} # the barrier configuration
+    ) where {N, T, D<:Cell{N, T}}
+    ds = directions(lb)
+    @inbounds for ci in CartesianIndices(newgrid)
+        i, j = ci.I
+        newgrid[ci] = Cell(ntuple(N) do k # collect the densities
+            ei = ds[k]
+            m, n = size(grid)
+            i2, j2 = mod1(i - ei[1], m), mod1(j - ei[2], n)
+            if barrier[i2, j2]
+                # if the cell is a barrier, the fluid flows back
+                density(grid[i, j], flip_direction_index(lb, k))
+            else
+                # otherwise, the fluid flows to the neighboring cell
+                density(grid[i2, j2], k)
+            end
+        end)
+    end
+end
+
 """
     equilibrium_density(lb::AbstractLBConfig, ρ, u)
 
-Compute the equilibrium density of the fluid from the total density and the velocity.
+Compute the equilibrium density of the fluid from the total density and the momentum.
 """
 function equilibrium_density(lb::AbstractLBConfig{D, N}, ρ, u) where {D, N}
     ws, ds = weights(lb), directions(lb)
@@ -63,52 +87,16 @@ end
 # the distribution of the 9 velocities at the equilibrium state
 weights(::D2Q9) = (1/36, 1/36, 1/9, 1/9, 4/9, 1/9, 1/9, 1/36, 1/36)
 function _equilibrium_density(u, ei)
-    # the equilibrium density of the fluid with a specific mean velocity
+    # the equilibrium density of the fluid with a specific mean momentum
     return (1 + 3 * dot(ei, u) + 9/2 * dot(ei, u)^2 - 3/2 * dot(u, u))
-end
-
-# streaming step
-function stream!(lb::AbstractLBConfig{2, N}, newgrid::AbstractMatrix{D}, grid::AbstractMatrix{D}, barrier::AbstractMatrix{Bool}) where {N, T, D<:Cell{N, T}}
-    ds = directions(lb)
-    @inbounds for ci in CartesianIndices(newgrid)
-        i, j = ci.I
-        newgrid[ci] = Cell(ntuple(N) do k
-            ei = ds[k]
-            m, n = size(grid)
-            i2, j2 = mod1(i - ei[1], m), mod1(j - ei[2], n)
-            if barrier[i2, j2]
-                density(grid[i, j], flip_direction_index(lb, k))
-            else
-                density(grid[i2, j2], k)
-            end
-        end)
-    end
 end
 
 # collision step, applied on a single cell
 function collide(lb::AbstractLBConfig{D, N}, rho; viscosity = 0.02) where {D, N}
     omega = 1 / (3 * viscosity + 0.5)   # "relaxation" parameter
     # Recompute macroscopic quantities:
-    v = velocity(lb, rho)
+    v = momentum(lb, rho)
     return (1 - omega) * rho + omega * equilibrium_density(lb, density(rho), v)
-end
-
-"""
-    curl(u::AbstractMatrix{Point2D{T}})
-
-Compute the curl of the velocity field in 2D, which is defined as:
-```math
-∂u_y/∂x−∂u_x/∂y
-```
-"""
-function curl(u::Matrix{Point2D{T}}) where T 
-    return map(CartesianIndices(u)) do ci
-        i, j = ci.I
-        m, n = size(u)
-        uy = u[mod1(i + 1, m), j][2] - u[mod1(i - 1, m), j][2]
-        ux = u[i, mod1(j + 1, n)][1] - u[i, mod1(j - 1, n)][1]
-        return uy - ux # a factor of 1/2 is missing here?
-    end
 end
 
 """
@@ -116,6 +104,7 @@ end
 
 A lattice Boltzmann simulation with D dimensions, N velocities, and lattice configuration CFG.
 """
+
 struct LatticeBoltzmann{D, N, T, CFG<:AbstractLBConfig{D, N}, MT<:AbstractMatrix{Cell{N, T}}, BT<:AbstractMatrix{Bool}}
     config::CFG # lattice configuration
     grid::MT    # density of the fluid
@@ -140,6 +129,24 @@ function step!(lb::LatticeBoltzmann)
     return lb
 end
 
+"""
+    curl(u::AbstractMatrix{Point2D{T}})
+
+Compute the curl of the momentum field in 2D, which is defined as:
+```math
+∂u_y/∂x−∂u_x/∂y
+```
+"""
+function curl(u::Matrix{Point2D{T}}) where T 
+    return map(CartesianIndices(u)) do ci
+        i, j = ci.I
+        m, n = size(u)
+        uy = u[mod1(i + 1, m), j][2] - u[mod1(i - 1, m), j][2]
+        ux = u[i, mod1(j + 1, n)][1] - u[i, mod1(j - 1, n)][1]
+        return uy - ux # a factor of 1/2 is missing here?
+    end
+end
+
 function example_d2q9(;
         height = 80, width = 200,
         u0 = Point(0.0, 0.1)) # initial and in-flow speed
@@ -154,4 +161,5 @@ function example_d2q9(;
 
     return LatticeBoltzmann(D2Q9(), rgrid, barrier)
 end
+
 
