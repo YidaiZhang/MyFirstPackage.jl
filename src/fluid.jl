@@ -17,7 +17,7 @@ directions(::D2Q9) = (
         Point(0, 0), Point(0, 1),
         Point(-1, 0), Point(1, -1),
         Point(-1, -1),
-)
+    )
 
 
 # directions[k] is the opposite of directions[flip_direction_index(k)
@@ -34,6 +34,7 @@ density(cell::Cell) = sum(cell.density)
 # the density of the fluid in a specific direction,
 # where the direction is an integer
 density(cell::Cell, direction::Int) = cell.density[direction]
+
 
 """
     momentum(lb::AbstractLBConfig, rho::Cell)
@@ -161,5 +162,4 @@ function example_d2q9(;
 
     return LatticeBoltzmann(D2Q9(), rgrid, barrier)
 end
-
 
